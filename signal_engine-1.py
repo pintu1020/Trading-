@@ -1,0 +1,123 @@
+"""
+Signal engine — combines trend, momentum, structure, and volume across
+two timeframes into a graded confluence signal. This is the "professional
+discretion" layer: no single indicator ever fires a signal alone.
+"""
+from dataclasses import dataclass
+from typing import Optional, List, Dict
+import indicators as ind
+import session_utils
+import config
+
+
+@dataclass
+class Signal:
+    direction: str          # "LONG" or "SHORT"
+    entry: float
+    stop_loss: float
+    take_profits: List[float]
+    leverage: int
+    confidence: int         # factors aligned, e.g. 3 or 4
+    max_confidence: int
+    session: str
+    reasons: List[str]
+
+
+def _trend_bias(closes_4h: List[float]) -> Optional[str]:
+    ema_fast = ind.ema(closes_4h, config.EMA_FAST)
+    ema_slow = ind.ema(closes_4h, config.EMA_SLOW)
+    if not ema_fast or not ema_slow:
+        return None
+    if ema_fast[-1] > ema_slow[-1]:
+        return "up"
+    if ema_fast[-1] < ema_slow[-1]:
+        return "down"
+    return None
+
+
+def _momentum_ok(closes_1h: List[float], direction: str) -> bool:
+    rsi_vals = ind.rsi(closes_1h, config.RSI_PERIOD)
+    if not rsi_vals:
+        return False
+    latest_rsi = rsi_vals[-1]
+    if direction == "up":
+        return latest_rsi < config.RSI_OVERBOUGHT and latest_rsi > 45
+    else:
+        return latest_rsi > config.RSI_OVERSOLD and latest_rsi < 55
+
+
+def _volume_confirms(candles_1h: List[Dict]) -> bool:
+    if len(candles_1h) < config.BREAKOUT_LOOKBACK:
+        return False
+    avg_vol = ind.avg_volume(candles_1h[:-1], config.BREAKOUT_LOOKBACK)
+    latest_vol = candles_1h[-1]["volume"]
+    return avg_vol > 0 and latest_vol >= avg_vol * config.VOLUME_SPIKE_MULTIPLIER
+
+
+def evaluate(candles_4h: List[Dict], candles_1h: List[Dict]) -> Optional[Signal]:
+    """
+    Returns a Signal if confluence threshold is met, else None.
+    """
+    closes_4h = ind.closes(candles_4h)
+    closes_1h = ind.closes(candles_1h)
+
+    trend = _trend_bias(closes_4h)
+    if trend is None:
+        return None
+
+    breakout = ind.detect_breakout(candles_1h, config.BREAKOUT_LOOKBACK)
+    momentum_ok = _momentum_ok(closes_1h, trend)
+    volume_ok = _volume_confirms(candles_1h)
+    structure_ok = (trend == "up" and breakout == "up") or (trend == "down" and breakout == "down")
+
+    factors_met = sum([True, momentum_ok, volume_ok, structure_ok])  # trend always counted (1)
+    reasons = ["4H trend aligned"]
+    if momentum_ok:
+        reasons.append("RSI confirms momentum without exhaustion")
+    if volume_ok:
+        reasons.append("Volume spike confirms conviction")
+    if structure_ok:
+        reasons.append("1H breakout confirms structure")
+
+    if factors_met < config.MIN_CONFLUENCE:
+        return None
+
+    atr_vals = ind.atr(candles_1h, config.ATR_PERIOD)
+    if not atr_vals:
+        return None
+    latest_atr = atr_vals[-1]
+    entry = closes_1h[-1]
+    atr_pct = (latest_atr / entry) * 100
+
+    direction = "LONG" if trend == "up" else "SHORT"
+    sl_distance = latest_atr * config.ATR_SL_MULTIPLIER
+
+    if direction == "LONG":
+        stop_loss = entry - sl_distance
+        take_profits = [entry + sl_distance * rr for rr in config.TP_RR_TIERS]
+    else:
+        stop_loss = entry + sl_distance
+        take_profits = [entry - sl_distance * rr for rr in config.TP_RR_TIERS]
+
+    leverage = (
+        config.HIGH_VOL_LEVERAGE
+        if atr_pct >= config.HIGH_VOL_ATR_PCT_THRESHOLD
+        else config.BASE_LEVERAGE
+    )
+
+    session = session_utils.current_session()
+    if config.LOW_LIQUIDITY_MUTE and session in ("asian", "off_hours") and factors_met < config.MAX_CONFLUENCE:
+        # In thin liquidity, require full confluence to fire at all
+        return None
+
+    return Signal(
+        direction=direction,
+        entry=round(entry, 2),
+        stop_loss=round(stop_loss, 2),
+        take_profits=[round(tp, 2) for tp in take_profits],
+        leverage=leverage,
+        confidence=factors_met,
+        max_confidence=config.MAX_CONFLUENCE,
+        session=session,
+        reasons=reasons,
+    )
