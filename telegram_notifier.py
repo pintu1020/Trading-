@@ -63,9 +63,10 @@ def send_signal_alert(signal):
 
 def format_stats() -> str:
     s = database.get_stats()
+    expired = s.get("expired", 0)
     return (
         f"<b>Gold Signal Bot — Stats</b>\n\n"
         f"Total signals: {s['total']}\n"
-        f"Wins: {s['wins']}  Losses: {s['losses']}  Open: {s['open']}  Expired: {s['expired']}\n"
+        f"Wins: {s['wins']}  Losses: {s['losses']}  Open: {s['open']}  Expired: {expired}\n"
         f"Win rate (closed trades): {s['win_rate']}%"
     )
