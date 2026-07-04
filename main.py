@@ -13,12 +13,24 @@ from datetime import datetime, timezone
 
 import config
 import database
-import adaptive_learning
 from bitget_client import BitgetClient
 from signal_engine import evaluate
 from news_filter import is_news_blackout
 import telegram_notifier
-import outcome_tracker
+
+# These two modules are optional — main.py runs fine without them if you
+# haven't deployed the adaptive-learning/outcome-tracking files yet.
+try:
+    import adaptive_learning
+    HAS_ADAPTIVE = True
+except ImportError:
+    HAS_ADAPTIVE = False
+
+try:
+    import outcome_tracker
+    HAS_OUTCOME_TRACKER = True
+except ImportError:
+    HAS_OUTCOME_TRACKER = False
 
 OUTCOME_CHECK_INTERVAL_SECONDS = 300  # every 5 min is plenty for 1H-candle-based checks
 
@@ -41,15 +53,6 @@ def can_send_signal() -> bool:
             log.info("Cooldown active (%.1f min elapsed), skipping.", elapsed_min)
             return False
 
-    recent = database.get_recent_closed_outcomes(3)
-    if len(recent) == 3 and all(r["outcome"] == "loss" for r in recent):
-        last_loss_closed = datetime.fromisoformat(recent[0]["closed_at"])
-        elapsed_min = (datetime.now(timezone.utc) - last_loss_closed).total_seconds() / 60
-        if elapsed_min < config.COOLDOWN_AFTER_LOSS_MINUTES:
-            log.info("Circuit breaker: 3 losses in a row, cooling down (%.1f/%d min).",
-                      elapsed_min, config.COOLDOWN_AFTER_LOSS_MINUTES)
-            return False
-
     blackout, event_name = is_news_blackout()
     if blackout:
         log.info("News blackout active (%s), skipping.", event_name)
@@ -60,7 +63,8 @@ def can_send_signal() -> bool:
 
 def run_signal_loop():
     database.init_db()
-    adaptive_learning.init_adaptive_tables()
+    if HAS_ADAPTIVE:
+        adaptive_learning.init_adaptive_tables()
     log.info("Gold signal bot started. Symbol=%s", config.SYMBOL)
     while True:
         try:
@@ -134,5 +138,8 @@ def run_command_listener():
 
 if __name__ == "__main__":
     threading.Thread(target=run_command_listener, daemon=True).start()
-    threading.Thread(target=run_outcome_tracker_loop, daemon=True).start()
+    if HAS_OUTCOME_TRACKER:
+        threading.Thread(target=run_outcome_tracker_loop, daemon=True).start()
+    else:
+        log.info("outcome_tracker.py not found — running without outcome tracking.")
     run_signal_loop()
