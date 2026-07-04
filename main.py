@@ -13,10 +13,14 @@ from datetime import datetime, timezone
 
 import config
 import database
+import adaptive_learning
 from bitget_client import BitgetClient
 from signal_engine import evaluate
 from news_filter import is_news_blackout
 import telegram_notifier
+import outcome_tracker
+
+OUTCOME_CHECK_INTERVAL_SECONDS = 300  # every 5 min is plenty for 1H-candle-based checks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gold-signal-bot")
@@ -37,6 +41,15 @@ def can_send_signal() -> bool:
             log.info("Cooldown active (%.1f min elapsed), skipping.", elapsed_min)
             return False
 
+    recent = database.get_recent_closed_outcomes(3)
+    if len(recent) == 3 and all(r["outcome"] == "loss" for r in recent):
+        last_loss_closed = datetime.fromisoformat(recent[0]["closed_at"])
+        elapsed_min = (datetime.now(timezone.utc) - last_loss_closed).total_seconds() / 60
+        if elapsed_min < config.COOLDOWN_AFTER_LOSS_MINUTES:
+            log.info("Circuit breaker: 3 losses in a row, cooling down (%.1f/%d min).",
+                      elapsed_min, config.COOLDOWN_AFTER_LOSS_MINUTES)
+            return False
+
     blackout, event_name = is_news_blackout()
     if blackout:
         log.info("News blackout active (%s), skipping.", event_name)
@@ -47,6 +60,7 @@ def can_send_signal() -> bool:
 
 def run_signal_loop():
     database.init_db()
+    adaptive_learning.init_adaptive_tables()
     log.info("Gold signal bot started. Symbol=%s", config.SYMBOL)
     while True:
         try:
@@ -71,6 +85,16 @@ def run_signal_loop():
         time.sleep(config.POLL_INTERVAL_SECONDS)
 
 
+def run_outcome_tracker_loop():
+    log.info("Outcome tracker started.")
+    while True:
+        try:
+            outcome_tracker.check_open_signals()
+        except Exception as e:
+            log.error("Error in outcome tracker: %s", e)
+        time.sleep(OUTCOME_CHECK_INTERVAL_SECONDS)
+
+
 def run_command_listener():
     """Simple long-polling handler for /stats and /status commands."""
     offset = None
@@ -88,12 +112,19 @@ def run_command_listener():
                 text = message.get("text", "")
                 chat_id = str(message.get("chat", {}).get("id", ""))
 
-                if text == "/stats":
-                    telegram_notifier.send_message(telegram_notifier.format_stats(), chat_id)
-                elif text == "/status":
-                    today_count = database.signals_today_count()
+                try:
+                    if text == "/stats":
+                        telegram_notifier.send_message(telegram_notifier.format_stats(), chat_id)
+                    elif text == "/status":
+                        today_count = database.signals_today_count()
+                        telegram_notifier.send_message(
+                            f"Bot is running.\nSignals today: {today_count}/{config.MAX_SIGNALS_PER_DAY}",
+                            chat_id,
+                        )
+                except Exception as cmd_err:
+                    log.error("Command '%s' failed: %s", text, cmd_err)
                     telegram_notifier.send_message(
-                        f"Bot is running.\nSignals today: {today_count}/{config.MAX_SIGNALS_PER_DAY}",
+                        "⚠️ Something went wrong processing that command. Check the logs.",
                         chat_id,
                     )
         except Exception as e:
@@ -102,6 +133,6 @@ def run_command_listener():
 
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_command_listener, daemon=True)
-    t.start()
+    threading.Thread(target=run_command_listener, daemon=True).start()
+    threading.Thread(target=run_outcome_tracker_loop, daemon=True).start()
     run_signal_loop()
