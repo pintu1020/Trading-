@@ -23,23 +23,36 @@ def send_message(text: str, chat_id: str = None):
 
 
 def format_signal(signal) -> str:
-    arrow = "🟢 LONG" if signal.direction == "LONG" else "🔴 SHORT"
-    confidence_bar = "★" * signal.confidence + "☆" * (signal.max_confidence - signal.confidence)
+    direction_emoji = "📈 LONG" if signal.direction == "LONG" else "📉 SHORT"
+    confidence_score = round((signal.confidence / signal.max_confidence) * 100)
+    stars = "⭐" * signal.confidence + "☆" * (signal.max_confidence - signal.confidence)
+
+    # Small entry zone band around the exact calculated entry, since real
+    # fills rarely land on one exact tick.
+    entry_buffer = signal.entry * 0.0015  # ~0.15% zone width
+    zone_low = round(signal.entry - entry_buffer, 2)
+    zone_high = round(signal.entry + entry_buffer, 2)
 
     tp_lines = "\n".join(
-        f"  TP{i+1}: <b>{tp}</b>" for i, tp in enumerate(signal.take_profits)
+        f"✅ TP{i+1}: {tp}" for i, tp in enumerate(signal.take_profits)
     )
     reasons = "\n".join(f"• {r}" for r in signal.reasons)
 
     return (
-        f"<b>XAU/USDT Signal — {arrow}</b>\n\n"
-        f"Entry: <b>{signal.entry}</b>\n"
-        f"Stop Loss: <b>{signal.stop_loss}</b>\n"
+        f"🚨 NEW TRADE SIGNAL 🚨\n\n"
+        f"📊 Pair: XAU/USDT\n"
+        f"{direction_emoji}\n\n"
+        f"💰 Entry Zone:\n"
+        f"• {zone_low} – {zone_high}\n\n"
+        f"🎯 Take Profit:\n"
         f"{tp_lines}\n\n"
-        f"Suggested Leverage: <b>{signal.leverage}x</b>\n"
-        f"Confidence: {confidence_bar} ({signal.confidence}/{signal.max_confidence})\n"
-        f"Session: {signal.session.replace('_', ' ').title()}\n\n"
+        f"🛑 Stop Loss:\n{signal.stop_loss}\n\n"
+        f"⚡ Leverage:\n{signal.leverage}x (Max {signal.leverage * 2}x)\n\n"
+        f"🎯 AI Confidence:\n{stars} {confidence_score}/100\n\n"
+        f"⚠️ Risk:\n1–2% of your account per trade\n\n"
+        f"📌 Session: {signal.session.replace('_', ' ').title()}\n\n"
         f"<i>Confluence factors:</i>\n{reasons}\n\n"
+        f"📌 Status:\n🟢 Signal Active\n\n"
         f"⚠️ Signal only — no auto-execution. Manage your own risk."
     )
 
@@ -53,6 +66,6 @@ def format_stats() -> str:
     return (
         f"<b>Gold Signal Bot — Stats</b>\n\n"
         f"Total signals: {s['total']}\n"
-        f"Wins: {s['wins']}  Losses: {s['losses']}  Open: {s['open']}\n"
+        f"Wins: {s['wins']}  Losses: {s['losses']}  Open: {s['open']}  Expired: {s['expired']}\n"
         f"Win rate (closed trades): {s['win_rate']}%"
     )
