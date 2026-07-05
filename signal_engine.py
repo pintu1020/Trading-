@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 import indicators as ind
 import session_utils
+import volatility_regime
+import dxy_filter
 import config
+
+try:
+    import adaptive_learning
+    HAS_ADAPTIVE = True
+except ImportError:
+    HAS_ADAPTIVE = False
 
 
 @dataclass
@@ -64,6 +72,7 @@ def evaluate(candles_4h: List[Dict], candles_1h: List[Dict]) -> Optional[Signal]
     trend = _trend_bias(closes_4h)
     if trend is None:
         return None
+    direction = "LONG" if trend == "up" else "SHORT"
 
     breakout = ind.detect_breakout(candles_1h, config.BREAKOUT_LOOKBACK)
     momentum_ok = _momentum_ok(closes_1h, trend)
@@ -79,7 +88,45 @@ def evaluate(candles_4h: List[Dict], candles_1h: List[Dict]) -> Optional[Signal]
     if structure_ok:
         reasons.append("1H breakout confirms structure")
 
-    if factors_met < config.MIN_CONFLUENCE:
+    session = session_utils.current_session()
+    if HAS_ADAPTIVE:
+        required = adaptive_learning.effective_min_confluence(session)
+    else:
+        required = (
+            config.MAX_CONFLUENCE
+            if (config.LOW_LIQUIDITY_MUTE and session in ("asian", "off_hours"))
+            else config.MIN_CONFLUENCE
+        )
+
+    # Volatility regime — in a choppy/squeezed market, most breakouts are
+    # fakeouts, so require full confluence instead of the normal minimum.
+    choppy = volatility_regime.is_choppy(candles_1h)
+    if choppy:
+        required = max(required, config.MAX_CONFLUENCE)
+
+    # DXY correlation — gold and the dollar are normally inversely correlated.
+    # If DXY is trending the SAME direction as this gold signal, that's a
+    # sign something unusual is happening (correlation breakdown), so
+    # require full confluence. If DXY confirms the normal inverse
+    # relationship, add it as a supporting reason. Fails open if DXY data
+    # is unavailable — never blocks a signal due to a missing data point.
+    dxy_trend = dxy_filter.get_dxy_trend()
+    if dxy_trend in ("up", "down"):
+        expected_inverse = "down" if direction == "LONG" else "up"
+        if dxy_trend == expected_inverse:
+            reasons.append("DXY confirms normal inverse correlation with gold")
+        else:
+            required = max(required, config.MAX_CONFLUENCE)
+
+    import logging
+    logging.getLogger("signal-engine").info(
+        "Factor check — trend:%s momentum:%s volume:%s structure:%s "
+        "(met %d/%d, need %d, session:%s, choppy:%s, dxy:%s)",
+        trend, momentum_ok, volume_ok, structure_ok, factors_met,
+        config.MAX_CONFLUENCE, required, session, choppy, dxy_trend
+    )
+
+    if factors_met < required:
         return None
 
     atr_vals = ind.atr(candles_1h, config.ATR_PERIOD)
@@ -89,7 +136,6 @@ def evaluate(candles_4h: List[Dict], candles_1h: List[Dict]) -> Optional[Signal]
     entry = closes_1h[-1]
     atr_pct = (latest_atr / entry) * 100
 
-    direction = "LONG" if trend == "up" else "SHORT"
     sl_distance = latest_atr * config.ATR_SL_MULTIPLIER
 
     if direction == "LONG":
@@ -104,11 +150,6 @@ def evaluate(candles_4h: List[Dict], candles_1h: List[Dict]) -> Optional[Signal]
         if atr_pct >= config.HIGH_VOL_ATR_PCT_THRESHOLD
         else config.BASE_LEVERAGE
     )
-
-    session = session_utils.current_session()
-    if config.LOW_LIQUIDITY_MUTE and session in ("asian", "off_hours") and factors_met < config.MAX_CONFLUENCE:
-        # In thin liquidity, require full confluence to fire at all
-        return None
 
     return Signal(
         direction=direction,
