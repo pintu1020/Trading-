@@ -41,6 +41,21 @@ TP_RR_TIERS = [1.5, 2.5, 4.0]  # 3 take-profit tiers in R multiples
 BREAKOUT_LOOKBACK = 20       # candles used for structure/breakout check
 VOLUME_SPIKE_MULTIPLIER = 1.5  # current vol vs avg vol
 
+# Note: volatility regime (Bollinger squeeze/chop detection) constants
+# live in volatility_regime.py itself, since it uses a self-contained
+# percentile-based approach rather than a fixed threshold.
+
+# ── DXY (US Dollar Index) correlation filter (new) ──────────────────
+# Gold and the dollar are tightly inverse-correlated. If DXY is trending
+# strongly in the direction that contradicts a signal (e.g. dollar
+# rallying hard while gold gives a LONG), the signal is vetoed.
+# Fails open: if DXY data can't be fetched, this filter is skipped
+# rather than blocking signals on a data outage.
+DXY_FILTER_ENABLED = True
+DXY_TREND_LOOKBACK = 20       # candles used to measure DXY trend
+DXY_STRONG_TREND_PCT = 0.3    # % change over lookback considered a "strong" dollar move
+DXY_CACHE_SECONDS = 900       # refresh DXY data at most every 15 min
+
 # ── Confidence scoring ───────────────────────────────────────────────
 # A signal only fires if at least MIN_CONFLUENCE of these factors align:
 # trend(EMA), momentum(RSI), structure(breakout), volume
