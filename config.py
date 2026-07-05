@@ -10,7 +10,9 @@ BITGET_API_KEY = os.environ.get("BITGET_API_KEY", "")
 BITGET_API_SECRET = os.environ.get("BITGET_API_SECRET", "")
 BITGET_API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE", "")
 
-SYMBOL = os.environ.get("SYMBOL", "XAUTUSDT")          # Tether Gold perp
+SYMBOL = os.environ.get("SYMBOL", "XAUUSDT")           # tracks real gold spot index (XAU),
+                                                        # NOT XAUTUSDT (Tether Gold token,
+                                                        # which can drift from real gold price)
 PRODUCT_TYPE = "USDT-FUTURES"
 
 REST_BASE_URL = "https://api.bitget.com"
