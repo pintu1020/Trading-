@@ -59,6 +59,26 @@ def avg_volume(candles: List[Dict], period: int) -> float:
     return sum(vols) / len(vols) if vols else 0.0
 
 
+def bollinger_bandwidth(values: List[float], period: int = 20, std_dev: float = 2.0) -> List[float]:
+    """
+    Returns bandwidth = (upper - lower) / middle for each point where a full
+    window is available. A narrow, shrinking bandwidth signals a squeeze/chop
+    regime; a wide, expanding bandwidth signals a trending regime.
+    """
+    if len(values) < period:
+        return []
+    bandwidths = []
+    for i in range(period - 1, len(values)):
+        window = values[i - period + 1:i + 1]
+        mean = sum(window) / period
+        variance = sum((v - mean) ** 2 for v in window) / period
+        stdev = variance ** 0.5
+        upper = mean + std_dev * stdev
+        lower = mean - std_dev * stdev
+        bandwidths.append((upper - lower) / mean if mean else 0.0)
+    return bandwidths
+
+
 def detect_breakout(candles: List[Dict], lookback: int) -> str:
     """
     Returns 'up', 'down', or 'none' — whether the latest close broke
@@ -76,3 +96,4 @@ def detect_breakout(candles: List[Dict], lookback: int) -> str:
     if last_close < recent_low:
         return "down"
     return "none"
+
