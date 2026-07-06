@@ -15,6 +15,19 @@ SYMBOL = os.environ.get("SYMBOL", "XAUUSDT")           # tracks real gold spot i
                                                         # which can drift from real gold price)
 PRODUCT_TYPE = "USDT-FUTURES"
 
+# ── Price source (new) ───────────────────────────────────────────────
+# "bitget" = crypto futures API (works on Railway, close-but-not-exact
+#            match to real gold, no VPS needed)
+# "mt5"    = exact Bitget CFD/MT5 price feed (requires Windows VPS with
+#            MT5 terminal running — will NOT work on Railway)
+PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "bitget")
+
+# ── GoldAPI reference cross-check (new) ─────────────────────────────
+# Purely informational — shows a real independent gold quote alongside
+# each signal so you can sanity-check accuracy at a glance. Never blocks
+# a signal. Get a free key at https://www.goldapi.io
+GOLDAPI_KEY = os.environ.get("GOLDAPI_KEY", "")
+
 REST_BASE_URL = "https://api.bitget.com"
 WS_URL = "wss://ws.bitget.com/v2/ws/public"
 
@@ -24,7 +37,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ── Timeframes ────────────────────────────────────────────────────────
 TREND_TIMEFRAME = "4H"      # bias
-TRIGGER_TIMEFRAME = "1H"    # entry confirmation
+TRIGGER_TIMEFRAME = "15m"   # entry confirmation — faster reaction than 1H,
+                             # but naturally noisier; this is a deliberate
+                             # tradeoff toward speed over signal cleanliness
 
 # ── Indicator settings (gold-tuned, NOT the same as crypto) ────────────
 EMA_FAST = 50
@@ -35,7 +50,9 @@ RSI_OVERBOUGHT = 68          # tighter bands than crypto (gold chops more)
 RSI_OVERSOLD = 32
 
 ATR_PERIOD = 14
-ATR_SL_MULTIPLIER = 1.5      # stop loss = ATR * this
+ATR_SL_MULTIPLIER = 1.0      # tightened from 1.5 — closer SL like manual traders use.
+                             # Tradeoff: more likely to get stopped out by normal
+                             # noise/wicks before price reverses in your favor.
 TP_RR_TIERS = [1.5, 2.5, 4.0]  # 3 take-profit tiers in R multiples
 
 BREAKOUT_LOOKBACK = 20       # candles used for structure/breakout check
@@ -69,7 +86,7 @@ HIGH_VOL_ATR_PCT_THRESHOLD = 0.9   # ATR as % of price above this = "high vol"
 
 # ── Frequency / discipline controls ─────────────────────────────────
 MAX_SIGNALS_PER_DAY = 4      # real pros don't trade constantly
-MIN_MINUTES_BETWEEN_SIGNALS = 90
+MIN_MINUTES_BETWEEN_SIGNALS = 45   # reduced from 90 to match faster 15m trigger timeframe
 COOLDOWN_AFTER_LOSS_MINUTES = 60   # optional extra pause after a tracked loss
 
 # ── Session awareness (UTC hours) ───────────────────────────────────
