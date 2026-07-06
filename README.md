@@ -58,6 +58,66 @@ a signal if their data source has an issue):
   added as a supporting reason in the alert. Pulled from Yahoo Finance's
   free endpoint, cached 15 min (no API key needed).
 
+## Exact Bitget CFD/MT5 price matching (new, optional)
+
+If you need the bot to track Bitget's *own* CFD/MT5 XAUUSD feed exactly
+(not just "close to real gold" via the crypto futures API), use
+`mt5_client.py`. This requires a completely different deployment:
+
+**This does NOT run on Railway.** The official `MetaTrader5` Python
+package only connects to a terminal on the same machine — it can't
+reach a remote/cloud MT5 terminal over the network. You need:
+
+1. A Windows VPS (e.g. Contabo, Vultr — around $5-15/month)
+2. MT5 terminal installed and logged into your Bitget CFD account
+   (get server/login/password from the Bitget app: TradFi > CFD > account details)
+3. `pip install MetaTrader5` on that VPS
+4. The **entire bot** (not just `mt5_client.py`) running on that VPS,
+   with `PRICE_SOURCE=mt5` set in its environment variables
+
+Test the connection directly first: `python mt5_client.py` on the VPS —
+it'll fetch a few candles and the live ticker price so you can confirm
+the symbol name and connection work before trusting it in the full bot.
+
+Check `MT5_SYMBOL` at the top of `mt5_client.py` matches exactly what
+shows in your MT5 terminal's Market Watch panel — some brokers suffix
+symbols differently (e.g. `XAUUSD.a`).
+
+**I could not test this file myself** — building it required no
+network/Windows access in my environment. Verify it works on your VPS
+before relying on it for real signals.
+
+## GoldAPI reference cross-check (new, optional)
+
+Every signal can show an independent real gold quote from GoldAPI.io
+alongside the bot's own entry price, so you get an instant sanity check:
+
+```
+🔎 Reference spot (GoldAPI): 4151.20 (bot entry is +0.05% vs. this)
+```
+
+To enable: get a free API key at https://www.goldapi.io and set
+`GOLDAPI_KEY` in your environment variables. Without a key, this line
+is simply omitted — nothing else changes.
+
+This is purely informational — it never blocks a signal, and if
+GoldAPI is unreachable it fails open silently (logs a warning, omits
+the line, doesn't crash).
+
+**Security note**: treat this API key like a password. Never paste it
+directly into a chat, commit it to a public repo, or hardcode it in
+a file — always set it as an environment variable. If a key is ever
+exposed, regenerate it immediately on goldapi.io.
+
+## Which price source should you actually use?
+
+For most purposes, the default Bitget futures API (`XAUUSDT`) tracks
+real gold closely enough (~1-2% basis spread, normal for any index/
+futures product) and requires zero extra infrastructure. Only go
+through the MT5 VPS setup if you specifically need to match Bitget's
+own CFD quotes tick-for-tick — e.g. because you're cross-referencing
+signals against trades you place directly on that CFD account.
+
 ## Signal filtering: volatility regime + DXY correlation (new)
 
 Two additional filters run inside `signal_engine.py`, both tightening
