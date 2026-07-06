@@ -5,6 +5,7 @@ command handling (/stats, /status).
 import requests
 import config
 import database
+import goldapi_client
 
 
 def _api_url(method: str) -> str:
@@ -30,13 +31,24 @@ def format_signal(signal) -> str:
     # Small entry zone band around the exact calculated entry, since real
     # fills rarely land on one exact tick.
     entry_buffer = signal.entry * 0.0015  # ~0.15% zone width
-    zone_low = round(signal.entry - entry_buffer, 2)
-    zone_high = round(signal.entry + entry_buffer, 2)
+    zone_low = round(signal.entry - entry_buffer)
+    zone_high = round(signal.entry + entry_buffer)
 
     tp_lines = "\n".join(
         f"✅ TP{i+1}: {tp}" for i, tp in enumerate(signal.take_profits)
     )
     reasons = "\n".join(f"• {r}" for r in signal.reasons)
+
+    # Reference cross-check against an independent gold quote (GoldAPI).
+    # Purely informational — omitted entirely if not configured or unreachable.
+    reference_line = ""
+    ref_price = goldapi_client.get_reference_price()
+    if ref_price is not None:
+        diff_pct = (signal.entry - ref_price) / ref_price * 100
+        reference_line = (
+            f"🔎 Reference spot (GoldAPI): {round(ref_price, 2)} "
+            f"(bot entry is {diff_pct:+.2f}% vs. this)\n\n"
+        )
 
     return (
         f"🚨 NEW TRADE SIGNAL 🚨\n\n"
@@ -51,6 +63,7 @@ def format_signal(signal) -> str:
         f"🎯 AI Confidence:\n{stars} {confidence_score}/100\n\n"
         f"⚠️ Risk:\n1–2% of your account per trade\n\n"
         f"📌 Session: {signal.session.replace('_', ' ').title()}\n\n"
+        f"{reference_line}"
         f"<i>Confluence factors:</i>\n{reasons}\n\n"
         f"📌 Status:\n🟢 Signal Active\n\n"
         f"⚠️ Signal only — no auto-execution. Manage your own risk."
